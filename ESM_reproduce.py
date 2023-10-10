@@ -484,10 +484,13 @@ def main():
         mut_seq = NUDT15_WT_sequence
         mut_seq = mut_seq[:mut[0]] + alphabetAA_D_L[mut[1]] + mut_seq[mut[0]+1:] # Retrieve the whole mutated sequence
         # mut_seq[mut[0]] = alphabetAA_D_L[mut[1]]
+        
         print("WT:", NUDT15_WT_sequence, '\n')
         print("Mutatant:", mut_seq, '\n')
         print("\n")
-        
+    mut_location = []
+    aa_orig = []
+    aa_mut = []    
     list_seq = []
     target = []
     protein_type = []
@@ -495,18 +498,27 @@ def main():
     for mut in NUDT15_map:
         mut_seq = NUDT15_WT_sequence
         mut_seq = mut_seq[:mut[0]] + alphabetAA_D_L[mut[1]] + mut_seq[mut[0]+1:]
+        mut_location.append(mut[0])
+        aa_orig.append(NUDT15_WT_sequence[mut[0]])
+        aa_mut.append(alphabetAA_D_L[mut[1]])
         list_seq.append(mut_seq)
         protein_type.append("NUDT15")
     
     for mut in PTEN_map:
         mut_seq = PTEN_WT_sequence
         mut_seq = mut_seq[:mut[0]] + alphabetAA_D_L[mut[1]] + mut_seq[mut[0]+1:]
+        mut_location.append(mut[0])
+        aa_orig.append(PTEN_WT_sequence[mut[0]])
+        aa_mut.append(alphabetAA_D_L[mut[1]])
         list_seq.append(mut_seq)
         protein_type.append("PTEN")
         
     for mut in CYP2C9_map:
         mut_seq = CYP2C9_WT_sequence
         mut_seq = mut_seq[:mut[0]] + alphabetAA_D_L[mut[1]] + mut_seq[mut[0]+1:]
+        mut_location.append(mut[0])
+        aa_orig.append(CYP2C9_WT_sequence[mut[0]])
+        aa_mut.append(alphabetAA_D_L[mut[1]])
         list_seq.append(mut_seq)
         protein_type.append("CYP2C9")
         
@@ -514,7 +526,9 @@ def main():
     
     target = np.concatenate((NUDT15_Y, PTEN_Y, CYP2C9_Y), axis=0)
     output_df['target'] = target
-    
+    output_df['mutation_location'] = mut_location
+    output_df['aa_orig'] = aa_orig
+    output_df['mutate_to'] = aa_mut
     output_df['sequence'] = list_seq
     output_df['protein_type'] = protein_type
     output_df.to_csv("output.csv", index=False)
