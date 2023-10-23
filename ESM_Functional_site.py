@@ -7,7 +7,7 @@ import torch.optim as optim
 import pandas as pd
 from esm import Alphabet, FastaBatchedDataset, ProteinBertModel, pretrained, MSATransformer
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, confusion_matrix
-from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.model_selection import RepeatedStratifiedKFold, train_test_split, ShuffleSplit
 import pandas as pd
 from tqdm import tqdm
 from Bio import SeqIO
@@ -18,8 +18,11 @@ import models
 import torch
 import torch.nn as nn
 
+import wandb
 
-
+# Original Codes for the NoteBook
+def wandb_init():
+    wandb.init(project="ESM-1v-Functional-site", entity="hantang")
 def remove_insertions(sequence: str) -> str:
     """ Removes any insertions into the sequence. Needed to load aligned sequences in an MSA. """
     # This is an efficient way to delete lowercase characters and insertion characters from a string
@@ -83,10 +86,30 @@ def create_parser():
         help="1 for keep the ESM model unchanged, 0 for fine-tuning the ESM model",
     )
     
+    parser.add_argument(
+        "--save_model",
+        type=int,
+        default=0,
+        help="1 for saving the model, 0 for not saving the model",
+    )
+    
+    parser.add_argument(
+        "--target_type",
+        type=str,
+        default="classification",
+        help="Target type: ['classification', 'regression']",
+    )
+    parser.add_argument(
+        "--print_res",
+        type=int,
+        default=0,
+        help="1 for printing the results, 0 for not printing the results",
+    )
+    
     
     return parser
 
-criterion = nn.CrossEntropyLoss(weight=torch.tensor([1, 2.86, 2.84, 6.8], dtype=torch.float).cuda())
+
 
 def train_esm(model, batch, target, criterion, optimizer, args):
     optimizer.zero_grad()
@@ -101,6 +124,10 @@ def train_esm(model, batch, target, criterion, optimizer, args):
         print("Train Logits:", logits)
         print("Train Target:", target, "\n")
     loss = criterion(logits, target.cuda())
+    print(loss.dtype)
+    print(logits.dtype)
+    print(target.dtype)
+    print(target)
     loss.backward()
     optimizer.step()
     return loss
@@ -131,20 +158,40 @@ def eval_metrics(prediction, target):
 
 def main(args):
     
+    if args.target_type == "classification":
+        criterion = nn.CrossEntropyLoss(weight=torch.tensor([1, 2.86, 2.84, 6.8], dtype=torch.float).cuda())
+        target_class=4
+    elif args.target_type == "regression":
+        criterion = nn.MSELoss()
+        target_class=2
+    else:
+        raise ValueError("Target type not supported")
     batch_size = args.batch_size
-    kfold=RepeatedStratifiedKFold(n_splits=5,n_repeats=1,random_state=42)
-    
+    if args.target_type == "classification":
+        split_method=RepeatedStratifiedKFold(n_splits=5,n_repeats=1,random_state=42)
+    elif args.target_type == "regression":
+        split_method=ShuffleSplit(n_splits=5, test_size=0.25, random_state=42)
     df = pd.read_csv(args.data_input)
+    print(df.shape)
+    df = df[(df['abundance_score'].isna()==False)&(df['function_score'].isna()==False)]
+    df.reset_index(drop=True, inplace=True)
+    print(df.shape)
     
     sequence = df['sequence'].apply(remove_insertions)
     max_length = max([len(i) for i in sequence])
-    target = df['target']
+    if args.target_type == "classification":
+        target = df['target'].to_numopy()
+    elif args.target_type == "regression":
+        target = df[['abundance_score', 'function_score']].to_numpy()
     
     for model_location in args.model_location:
         esm_model, alphabet = pretrained.load_model_and_alphabet(model_location)
-        esm_model.eval()
-    esm_model, alphabet = pretrained.load_model_and_alphabet(model_location)
-
+        
+#    esm_model, alphabet = pretrained.load_model_and_alphabet(model_location)
+#    if args.fingerprint:
+#        esm_model.eval()
+#    else:
+#        esm_model.train()
     if torch.cuda.is_available():
         esm_model = esm_model.cuda()
         print("Transferred model to GPU")
@@ -155,15 +202,19 @@ def main(args):
     
 #    pooling = nn.AvgPool1d(166, stride=1).cuda()
     split_time = 0
-    for train_index, test_index in kfold.split(sequence, target):
+    for train_index, test_index in split_method.split(sequence, target):
         if args.pooling_method == "aa":
-            linear_model = models.ESMAttention1d(max_length=max_length, d_embedding=1280, target_class=4).cuda()
+            linear_model = models.ESMAttention1d(max_length=max_length, d_embedding=1280, target_class=target_class).cuda()
         elif args.pooling_method == "mean":
-            linear_model = models.ESMAttention1dMean(d_embedding=1280, target_class=4).cuda()
+            linear_model = models.ESMAttention1dMean(d_embedding=1280, target_class=target_class).cuda()
         else:
             raise ValueError("Pooling method not supported")
         # Model Reinitialization
-        optimizer = optim.Adam(linear_model.parameters(), lr=args.lr)
+        if args.fingerprints:
+            optimizer = optim.Adam(linear_model.parameters(), lr=args.lr)
+        else:
+            optimizer = optim.Adam(list(esm_model.parameters())+list(linear_model.parameters()), lr=args.lr)
+        
         ###
         print("Start training")
         print("batch_size:", args.batch_size)
@@ -184,9 +235,28 @@ def main(args):
 #        print(train_index, test_index)
 #        print(X_train.shape, X_test.shape)
         
+        # WanDB Init
+        wandb.init(
+            project="ESM-1v-Functional-site", 
+            entity="hirahtang",
+            config={
+                "model_location": model_location,
+                "data_input": args.data_input,
+                "lr": args.lr,
+                "epochs": args.epochs,
+                "batch_size": args.batch_size,
+                "pooling_method": args.pooling_method,
+                "fingerprints": args.fingerprints,
+                "save_model": args.save_model,
+                "target_type": args.target_type,
+                "split_time": split_time
+            }
+            )
+        # ----------------
+        
         for epoch in range(args.epochs):
             print("\tEpoch:", epoch)
-            args.print_res = False
+            args.print_res = True
             linear_model.train()
             iterate_loss = []
             for i in tqdm(range(len(train_index))[::batch_size]):  
@@ -195,13 +265,17 @@ def main(args):
                 data = [("protein{}".format(j), sequence[j]) for j in train_index[i:i+batch_size]]
 #                print(train_index[i:i+8])
                 data_y = target[train_index[i:i+batch_size]]
-#                print("data length", len(data))
-#                print(data_y.to_numpy())
-                data_y = torch.tensor(data_y.to_numpy(), dtype=torch.long)
-#                print(len(data), i, train_index[i])
+
+                data_y = torch.tensor(data_y, dtype=torch.float)
+
                 batch_labels, batch_strs, batch_tokens = batch_converter(data)
                 
-                with torch.no_grad():
+                if args.fingerprints:
+                    esm_model.eval()
+                    with torch.no_grad():
+                        results = esm_model(batch_tokens.cuda(), repr_layers=[33], return_contacts=False)
+                else:
+                    esm_model.train()
                     results = esm_model(batch_tokens.cuda(), repr_layers=[33], return_contacts=False)
                 repre = results['representations'][33]
                 
@@ -218,14 +292,18 @@ def main(args):
                 if i > 10:
                     args.print_res = False
                 train_loss = train_esm(linear_model, repre, data_y, criterion, optimizer, args)
-
+                if i % 100 == 1:
+                    wandb.log({"train_loss": train_loss,
+                               "epoch": epoch}, commit=False)
                 # loss = criterion(logits, data_y.cuda())
                 iterate_loss.append(train_loss)
+            wandb.log({"train_loss_epoch": sum(iterate_loss)/len(iterate_loss),
+                       "epoch": epoch})
             print("\t\tTrain loss:", sum(iterate_loss)/len(iterate_loss))
 
 #                break
             with torch.no_grad():
-                args.print_res = False
+                args.print_res = True
                 prediction_l = []
                 target_l  =[]
                 avg_loss = []
@@ -235,13 +313,15 @@ def main(args):
                     # test_data = [("protein{}".format(i), sequence[i]),]
                     # data_y = target[train_index[i:i+8]]
                     test_y = target[test_index[i:i+batch_size]]
+                    
                     # print(test_y)
-                    test_y = torch.tensor(test_y.to_numpy(), dtype=torch.long)
+                    test_y = torch.tensor(test_y, dtype=torch.long)
                     
                     # test_y = torch.tensor(data_y, dtype=torch.long)
 #                    print(test_y)
                     batch_labels, batch_strs, batch_tokens = batch_converter(test_data)
-                    
+                    if args.fingerprints:
+                        esm_model.eval()
                     results = esm_model(batch_tokens.cuda(), repr_layers=[33], return_contacts=False)
                     test_repre = results['representations'][33]
                    
@@ -263,17 +343,29 @@ def main(args):
 #                    if i > 40:
 #                        break
                 eval_scores = eval_metrics(prediction_l, target_l)
+                
                 print("\t\tMCC:", eval_scores[0])
                 print("\t\tF1:", eval_scores[1])
                 print("\t\tPrecision:", eval_scores[2])
                 print("\t\tRecall:", eval_scores[3])
                 print("\t\tAverage loss:", sum(avg_loss)/len(avg_loss))
-                    
-            
-    
+                
+                wandb.log({"test_loss": sum(avg_loss)/len(avg_loss),
+                            "epoch": epoch,
+                          "MCC": eval_scores[0],
+                          "F1": eval_scores[1],
+                          "Precision": eval_scores[2],
+                          "Recall": eval_scores[3]})
+                
+        if args.save_model and not args.fingerprints:
+            torch.save(esm_model.state_dict(), "{}_{}_finetuned_{}.pt".format(model_location, args.pooling_method, split_time))
+            print("Model saved to {}_{}_finetuned_{}.pt".format(model_location, args.pooling_method, split_time))           
+        wandb.finish()
+        
     print("End")
     
 if __name__ == "__main__":
+    wandb.login()
     parser = create_parser()
     args = parser.parse_args()
     print("code running")

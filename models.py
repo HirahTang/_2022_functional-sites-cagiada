@@ -8,7 +8,9 @@ import torch.nn.functional as F
 
 from sklearn.linear_model import Ridge
 
-
+#####
+# Downstream Model architectures
+#####
 
 class ESMAttention1d(nn.Module):
     """Outputs of the ESM model with the attention1d"""

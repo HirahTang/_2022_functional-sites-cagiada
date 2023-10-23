@@ -20,6 +20,10 @@ from catboost import CatBoostClassifier, Pool,cv
 from catboost.datasets import titanic
 from graphviz import Digraph
 
+#####
+# Experiments on reproducing the results of CatBoost with the original dataset
+####
+
 def MCC_test_subset(prediction,test):
     TP=0
     FP=0

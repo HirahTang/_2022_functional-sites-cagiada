@@ -10,6 +10,8 @@ import random
 import seaborn as sns
 import re
 
+import argparse
+
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.model_selection import cross_val_score
@@ -22,6 +24,9 @@ from graphviz import Digraph
 
 import warnings
 warnings.filterwarnings('ignore')
+
+#####
+# Reproduce the feature generation process of the original dataset
 
 alphabetAA_L_D={'-':0,'_' :0,'A':1,'C':2,'D':3,'E':4,'F':5,'G':6,'H':7,'I':8,'K':9,'L':10,'M':11,'N':12,'P':13,'Q':14,'R':15,'S':16,'T':17,'V':18,'W':19,'Y':20}
 alphabetAA_D_L={v: k for k, v in alphabetAA_L_D.items()}
@@ -68,7 +73,8 @@ def normalize_minmax(scores):
                                   
     return normalized_scores
 
-def features_classification(list_features_x,list_output_y,WT):
+
+def features_classification(list_features_x,list_output_y,WT, args):
     
     X=[]
     Y=[]
@@ -83,26 +89,30 @@ def features_classification(list_features_x,list_output_y,WT):
 
                 for elem in list_features_x:
                     if elem.ndim==1:
-                        if np.isnan(elem[i])==True:
+                        if np.isnan(elem[i])==True and not args.nan:
+                            
                             cond=False
+                            
                     else:
-                        if np.isnan(elem[i,j])==True:
+                        if np.isnan(elem[i,j])==True and not args.nan:
                             cond=False    
                 
                 for elem in list_output_y:
                     if elem.ndim==1:
-                        if np.isnan(elem[i])==True:
+                        if np.isnan(elem[i])==True and not args.nan:
                             cond=False
                     else:
-                        if np.isnan(elem[i,j])==True:
+                        if np.isnan(elem[i,j])==True and not args.nan:
                             cond=False 
 
                 if cond==True:
                     
                     for elem in list_features_x:
+                        
                         if elem.ndim==1:
                             temp_x.append(elem[i])
                         else:
+
                             temp_x.append(elem[i,j])
 
                     for elem in list_output_y:
@@ -115,9 +125,37 @@ def features_classification(list_features_x,list_output_y,WT):
                     X.append(temp_x)
                     Y.append(temp_y)
                     mapping_pos.append([i,j])
-        
+#    print(X)
+#    print(mapping_pos)
+#    print(len(X))
+#    print([len(w) for w in X])
+#    print(len(Y))
+#    print(Y)
     return np.array(X),Y,mapping_pos  
 
+def create_parser():
+    parser = argparse.ArgumentParser(
+            description='Settings for generating data'
+    )
+    parser.add_argument(
+            '--test', type=int,
+            help='open the testing phase, AKA do not save the produced data',
+            default=0,
+    )
+    
+    parser.add_argument(
+            '--nan', type=int,
+            help='open the nan phase, AKA do not remove the nan values',
+            default=0,
+    )
+    
+    parser.add_argument(
+            '--output_csv', type=str,
+            help='output filepath for scores of variant sequences',
+            default='output_adj.csv',
+    )
+    return parser
+    
 def multiclass_threshold(data_x,data_y,t_x,t_y):
     labels=np.copy(data_x)
     labels[:]=np.nan
@@ -281,6 +319,9 @@ def label_loading(CYP2C9_WT_sequence, NUDT15_WT_sequence, PTEN_WT_sequence):
         if score_abund[i] != 'NaN' and (mutation_load[i][-1:])!='~' and mutation_load[i][-1:]!='*' and mutation_load[i][-1:]!='X' and mutation_load[i] !="WT":
             CYP2C9_abundance[int(mutation_load[i][1:-1])-1, alphabetAA_L_D[mutation_load[i][-1:]]-1]=float(score_abund[i])
     
+    CYP2C9_abundance_norm=normalize_minmax(CYP2C9_abundance)
+    CYP2C9_function_norm=normalize_minmax(CYP2C9_function)
+    
     # Target: CYP2C9_function, CYP2C9_abundance
     
     # Load NUDT15
@@ -344,7 +385,9 @@ def label_loading(CYP2C9_WT_sequence, NUDT15_WT_sequence, PTEN_WT_sequence):
     PTEN_labels=multiclass_threshold(PTEN_abundance,PTEN_function,0.54,-0.9)
     CYP2C9_labels=multiclass_threshold(CYP2C9_abundance,CYP2C9_function,0.38,0.40)
     
-    return NUDT15_labels, PTEN_labels, CYP2C9_labels
+    return [NUDT15_labels, NUDT15_abundance_norm, NUDT15_function_norm], \
+        [PTEN_labels, PTEN_abundance_norm, PTEN_function_norm], \
+            [CYP2C9_labels, CYP2C9_abundance_norm, CYP2C9_function_norm]
 
 def computational_x(CYP2C9_WT_sequence, NUDT15_WT_sequence, PTEN_WT_sequence):
     
@@ -449,7 +492,7 @@ def computational_x(CYP2C9_WT_sequence, NUDT15_WT_sequence, PTEN_WT_sequence):
             [PTEN_GEMME, PTEN_rosetta_ddg_norm,PTEN_GEMME_mean,PTEN_rosetta_ddg_mean,PTEN_hydrophobicity_mut,PTEN_GEMME_neigbor_scores,PTEN_rosetta_neigbor_scores,PTEN_wcn], \
                 [CYP2C9_GEMME, CYP2C9_rosetta_ddg_norm,CYP2C9_GEMME_mean,CYP2C9_rosetta_ddg_mean,CYP2C9_hydrophobicity_mut,CYP2C9_GEMME_neigbor_scores,CYP2C9_rosetta_neigbor_scores,CYP2C9_wcn]
     
-def main():
+def main(args):
     CYP2C9_WT_sequence="MDSLVVLVLCLSCLLLLSLWRQSSGRGKLPPGPTPLPVIGNILQIGIKDISKSLTNLSKVYGPVFTLYFGLKPIVVLHGYEAVKEALIDLGEEFSGRGIFPLAERANRGFGIVFSNGKKWKEIRRFSLMTLRNFGMGKRSIEDRVQEEARCLVEELRKTKASPCDPTFILGCAPCNVICSIIFHKRFDYKDQQFLNLMEKLNENIKILSSPWIQICNNFSPIIDYFPGTHNKLLKNVAFMKSYILEKVKEHQESMDMNNPQDFIDCFLMKMEKEKHNQPSEFTIESLENTAVDLFGAGTETTSTTLRYALLLLLKHPEVTAKVQEEIERVIGRNRSPCMQDRSHMPYTDAVVHEVQRYIDLLPTSLPHAVTCDIKFRNYLIPKGTTILISLTSVLHDNKEFPNPEMFDPHHFLDEGGNFKKSKYFMPFSAGKRICVGEALAGMELFLFLTSILQNFNLKSLVDPKNLDTTPVVNGFASVPPFYQLCFIPV"
     CYP2C9_WT_seq_rose="-----------------------------PPGPTPLPVIGNILQIGIKDISKSLTNLSKVYGPVFTLYFGLKPIVVLHGYEAVKEALIDLGEEFSGRGIFPLAERANRGFGIVFSNGKKWKEIRRFSLMTLRNFGMGKRSIEDRVQEEARCLVEELRKTKASPCDPTFILGCAPCNVICSIIFHKRFDYKDQQFLNLMEKLNENIEILSSPWIQVYNNFPALLDYFPGTHNKLLKNVAFMKSYILEKVKEHQESMDMNNPQDFIDCFLMKMEKEKHNQPSEFTIESLENTAVDLFGAGTETTSTTLRYALLLLLKHPEVTAKVQEEIERVIGRNRSPCMQDRSHMPYTDAVVHEVQRYIDLLPTSLPHAVTCDIKFRNYLIPKGTTILISLTSVLHDNKEFPNPEMFDPHHFLDEGGNFKKSKYFMPFSAGKRICVGEALAGMELFLFLTSILQNFNLKSLVDPKNLDTTPVVNGFASVPPFYQLCFIPV"
     NUDT15_WT_sequence="MTASAQPRGRRPGVGVGVVVTSCKHPRCVLLGKRKGSVGAGSFQLPGGHLEFGETWEECAQRETWEEAALHLKNVHFASVVNSFIEKENYHYVTILMKGEVDVTHDSEPKNVEPEKNESWEWVPWEELPPLDQLFWGLRCLKEQGYDPFKEDLNHLVGYKGNHL"
@@ -458,7 +501,12 @@ def main():
     
     NUDT15_Xs, PTEN_Xs, CYP2C9_Xs = computational_x(CYP2C9_WT_sequence, NUDT15_WT_sequence, PTEN_WT_sequence)
     
-    NUDT15_labels, PTEN_labels, CYP2C9_labels=label_loading(CYP2C9_WT_sequence, NUDT15_WT_sequence, PTEN_WT_sequence)
+    NUDT15_all, PTEN_all, CYP2C9_alls=label_loading(CYP2C9_WT_sequence, NUDT15_WT_sequence, PTEN_WT_sequence)
+    
+    NUDT15_labels, NUDT15_abundance_norm, NUDT15_function_norm = NUDT15_all[0], NUDT15_all[1], NUDT15_all[2]
+    PTEN_labels, PTEN_abundance_norm, PTEN_function_norm = PTEN_all[0], PTEN_all[1], PTEN_all[2]
+    CYP2C9_labels, CYP2C9_abundance_norm, CYP2C9_function_norm = CYP2C9_alls[0], CYP2C9_alls[1], CYP2C9_alls[2]
+    
     
     print(NUDT15_labels.shape, PTEN_labels.shape, CYP2C9_labels.shape)
     
@@ -468,17 +516,39 @@ def main():
 #    NUDT15_X,NUDT15_Y,NUDT15_map=features_classification([np.random.rand(*x) for x in NUDT15_X],[NUDT15_labels],NUDT15_WT_sequence)
 #    PTEN_X,PTEN_Y,PTEN_map=features_classification([np.random.rand(*x) for x in PTEN_X],[PTEN_labels],PTEN_WT_sequence)
 #    CYP2C9_X,CYP2C9_Y,CYP2C9_map=features_classification([np.random.rand(*x) for x in CYP2C9_X],[CYP2C9_labels],CYP2C9_WT_sequence)
- 
-    NUDT15_X,NUDT15_Y,NUDT15_map=features_classification(NUDT15_Xs,[NUDT15_labels],NUDT15_WT_sequence)
-    PTEN_X,PTEN_Y,PTEN_map=features_classification(PTEN_Xs,[PTEN_labels],PTEN_WT_sequence)
-    CYP2C9_X, CYP2C9_Y, CYP2C9_map=features_classification(CYP2C9_Xs,[CYP2C9_labels],CYP2C9_WT_sequence)
-   
+
+#    print("The output of importance:\n", NUDT15_labels.shape, NUDT15_abundance_norm.shape, NUDT15_function_norm.shape)
+#    print(NUDT15_abundance_norm, PTEN_abundance_norm, CYP2C9_abundance_norm)
+
+#    print(PTEN_Xs)
+#    print(CYP2C9_Xs)
+    
+    _, NUDT15_abundance_norm_Y, _ = features_classification(NUDT15_Xs, [NUDT15_abundance_norm], NUDT15_WT_sequence, args)
+    _, NUDT15_function_norm_Y, _ = features_classification(NUDT15_Xs, [NUDT15_function_norm], NUDT15_WT_sequence, args)
+    
+    _, PTEN_abundance_norm_Y, _ = features_classification(PTEN_Xs, [PTEN_abundance_norm], PTEN_WT_sequence, args)
+    _, PTEN_function_norm_Y, _ = features_classification(PTEN_Xs, [PTEN_function_norm], PTEN_WT_sequence, args)
+    
+    _, CYP2C9_abundance_norm_Y, _ = features_classification(CYP2C9_Xs, [CYP2C9_abundance_norm], CYP2C9_WT_sequence, args)
+    _, CYP2C9_function_norm_Y, _ = features_classification(CYP2C9_Xs, [CYP2C9_function_norm], CYP2C9_WT_sequence, args)
+
+    NUDT15_X,NUDT15_Y,NUDT15_map=features_classification(NUDT15_Xs,[NUDT15_labels],NUDT15_WT_sequence, args)
+    PTEN_X,PTEN_Y,PTEN_map=features_classification(PTEN_Xs,[PTEN_labels],PTEN_WT_sequence, args)
+    CYP2C9_X, CYP2C9_Y, CYP2C9_map=features_classification(CYP2C9_Xs,[CYP2C9_labels],CYP2C9_WT_sequence, args)
+    
+    
+    
     print("Finished")
     print("NUDT15: ",len(NUDT15_Y), len(NUDT15_map))
     print("PTEN: ",len(PTEN_Y), len(PTEN_map))
     print("CYP2C9: ",len(CYP2C9_Y), len(CYP2C9_map))
     print(NUDT15_X.shape, PTEN_X.shape, CYP2C9_X.shape)
     print(NUDT15_map[:20])
+    
+    print("Norm test:\n")
+    print(len(NUDT15_abundance_norm_Y), len(NUDT15_function_norm_Y))
+    print(len(PTEN_abundance_norm_Y), len(PTEN_function_norm_Y))
+    print(len(CYP2C9_abundance_norm_Y), len(CYP2C9_function_norm_Y))
     
     for mut in NUDT15_map[:20]:
         mut_seq = NUDT15_WT_sequence
@@ -523,7 +593,8 @@ def main():
         protein_type.append("CYP2C9")
         
     output_df = pd.DataFrame(np.concatenate((NUDT15_X, PTEN_X, CYP2C9_X), axis=0))
-    
+    abundance_norm = np.concatenate((NUDT15_abundance_norm_Y, PTEN_abundance_norm_Y, CYP2C9_abundance_norm_Y), axis=0)
+    function_norm = np.concatenate((NUDT15_function_norm_Y, PTEN_function_norm_Y, CYP2C9_function_norm_Y), axis=0)
     target = np.concatenate((NUDT15_Y, PTEN_Y, CYP2C9_Y), axis=0)
     output_df['target'] = target
     output_df['mutation_location'] = mut_location
@@ -531,10 +602,14 @@ def main():
     output_df['mutate_to'] = aa_mut
     output_df['sequence'] = list_seq
     output_df['protein_type'] = protein_type
-    output_df.to_csv("output.csv", index=False)
+    output_df['abundance_score'] = abundance_norm
+    output_df['function_score'] = function_norm
+    if not args.test:
+        output_df.to_csv(args.output_csv, index=False)
         
-    
-    
 
 if __name__ == "__main__":
-    main()
+    parser = create_parser()
+    args = parser.parse_args()
+    main(args)
+    
