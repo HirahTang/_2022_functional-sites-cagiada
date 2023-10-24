@@ -124,10 +124,7 @@ def train_esm(model, batch, target, criterion, optimizer, args):
         print("Train Logits:", logits)
         print("Train Target:", target, "\n")
     loss = criterion(logits, target.cuda())
-    print(loss.dtype)
-    print(logits.dtype)
-    print(target.dtype)
-    print(target)
+
     loss.backward()
     optimizer.step()
     return loss
@@ -237,7 +234,8 @@ def main(args):
         
         # WanDB Init
         wandb.init(
-            project="ESM-1v-Functional-site", 
+            project="ESM-1v-Functional-site",
+            name="{}_{}_finetuned_{}_fingerprint".format(model_location, args.pooling_method, split_time, args.fingerprints),
             entity="hirahtang",
             config={
                 "model_location": model_location,
@@ -292,9 +290,10 @@ def main(args):
                 if i > 10:
                     args.print_res = False
                 train_loss = train_esm(linear_model, repre, data_y, criterion, optimizer, args)
-                if i % 100 == 1:
-                    wandb.log({"train_loss": train_loss,
-                               "epoch": epoch}, commit=False)
+                if i % 100 < batch_size:
+                    wandb.log({"step": i,
+                               "train_loss": train_loss,
+                               "epoch": epoch})
                 # loss = criterion(logits, data_y.cuda())
                 iterate_loss.append(train_loss)
             wandb.log({"train_loss_epoch": sum(iterate_loss)/len(iterate_loss),
@@ -315,7 +314,7 @@ def main(args):
                     test_y = target[test_index[i:i+batch_size]]
                     
                     # print(test_y)
-                    test_y = torch.tensor(test_y, dtype=torch.long)
+                    test_y = torch.tensor(test_y, dtype=torch.float)
                     
                     # test_y = torch.tensor(data_y, dtype=torch.long)
 #                    print(test_y)
@@ -342,21 +341,28 @@ def main(args):
 #                    print(avg_loss, len(prediction_l), len(target_l))
 #                    if i > 40:
 #                        break
-                eval_scores = eval_metrics(prediction_l, target_l)
+                if args.target_type == "classification":
+                    
+                    eval_scores = eval_metrics(prediction_l, target_l)
+                    
+                    print("\t\tMCC:", eval_scores[0])
+                    print("\t\tF1:", eval_scores[1])
+                    print("\t\tPrecision:", eval_scores[2])
+                    print("\t\tRecall:", eval_scores[3])
+                    print("\t\tAverage loss:", sum(avg_loss)/len(avg_loss))
+                    
+                    wandb.log({"test_loss": sum(avg_loss)/len(avg_loss),
+                                "epoch": epoch,
+                            "MCC": eval_scores[0],
+                            "F1": eval_scores[1],
+                            "Precision": eval_scores[2],
+                            "Recall": eval_scores[3]})
+                elif args.target_type == "regression":
+                    wandb.log({"test_loss": sum(avg_loss)/len(avg_loss),
+                                "epoch": epoch})
                 
-                print("\t\tMCC:", eval_scores[0])
-                print("\t\tF1:", eval_scores[1])
-                print("\t\tPrecision:", eval_scores[2])
-                print("\t\tRecall:", eval_scores[3])
-                print("\t\tAverage loss:", sum(avg_loss)/len(avg_loss))
-                
-                wandb.log({"test_loss": sum(avg_loss)/len(avg_loss),
-                            "epoch": epoch,
-                          "MCC": eval_scores[0],
-                          "F1": eval_scores[1],
-                          "Precision": eval_scores[2],
-                          "Recall": eval_scores[3]})
-                
+                else:
+                    raise ValueError("Target type not supported")
         if args.save_model and not args.fingerprints:
             torch.save(esm_model.state_dict(), "{}_{}_finetuned_{}.pt".format(model_location, args.pooling_method, split_time))
             print("Model saved to {}_{}_finetuned_{}.pt".format(model_location, args.pooling_method, split_time))           
