@@ -21,8 +21,7 @@ import torch.nn as nn
 import wandb
 
 # Original Codes for the NoteBook
-def wandb_init():
-    wandb.init(project="ESM-1v-Functional-site", entity="hantang")
+
 def remove_insertions(sequence: str) -> str:
     """ Removes any insertions into the sequence. Needed to load aligned sequences in an MSA. """
     # This is an efficient way to delete lowercase characters and insertion characters from a string
@@ -177,7 +176,7 @@ def main(args):
     sequence = df['sequence'].apply(remove_insertions)
     max_length = max([len(i) for i in sequence])
     if args.target_type == "classification":
-        target = df['target'].to_numopy()
+        target = df['target'].to_numpy()
     elif args.target_type == "regression":
         target = df[['abundance_score', 'function_score']].to_numpy()
     
@@ -235,7 +234,7 @@ def main(args):
         # WanDB Init
         wandb.init(
             project="ESM-1v-Functional-site",
-            name="{}_{}_finetuned_{}_fingerprint".format(model_location, args.pooling_method, split_time, args.fingerprints),
+            name="{}_{}_finetuned_{}_fingerprint_{}".format(model_location, args.pooling_method, split_time, args.fingerprints),
             entity="hirahtang",
             config={
                 "model_location": model_location,
